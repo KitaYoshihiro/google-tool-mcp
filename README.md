@@ -145,9 +145,9 @@ enabled = true
 - `list_drive_files`: Google Drive のファイル metadata 一覧を取得します
 - `read_drive_file`: Google Drive のファイル metadata を 1 件取得します
 
-`read_gmail_attachment_text` は、明示した `message_id` と `attachment_id` の添付ファイルだけを読み取ります。対応する形式は、`text/plain`、`text/csv`、`text/tab-separated-values`、`text/html`、`text/markdown`、`application/json`、`application/xml`、`text/xml` と、同等の拡張子を持つテキストファイルです。PDF、Office 文書、画像、zip などのバイナリ添付ファイルは読み取りません。既定では `max_bytes=1048576`、`max_chars=5000` で読み取り量と返却量を制限します。
+`list_gmail_attachments` は、後続の添付ファイル操作で使う `part_id` を返します。`read_gmail_attachment_text` は、明示した `message_id` と `part_id` の添付ファイルだけを読み取ります。対応する形式は、`text/plain`、`text/csv`、`text/tab-separated-values`、`text/html`、`text/markdown`、`application/json`、`application/xml`、`text/xml` と、同等の拡張子を持つテキストファイルです。PDF、Office 文書、画像、zip などのバイナリ添付ファイルは読み取りません。既定では `max_bytes=1048576`、`max_chars=5000` で読み取り量と返却量を制限します。
 
-`download_gmail_attachment` は添付ファイル本文を MCP レスポンスには含めず、ローカルファイルとして保存して `saved_path`、`sha256`、MIME type、サイズなどの metadata だけを返します。`download_dir` を指定しない場合、既定では以下の profile 別キャッシュディレクトリに自動保存します。
+`download_gmail_attachment` は `message_id` と `part_id` で対象添付ファイルを選びます。添付ファイル本文を MCP レスポンスには含めず、ローカルファイルとして保存して `saved_path`、`sha256`、MIME type、サイズなどの metadata だけを返します。`download_dir` を指定しない場合、既定では以下の profile 別キャッシュディレクトリに自動保存します。
 
 ```text
 ~/.cache/google-tool/attachments/<profile-or-default>/<message-id>/

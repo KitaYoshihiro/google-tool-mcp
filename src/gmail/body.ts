@@ -14,6 +14,7 @@ export interface RawMessagePart {
   filename?: string;
   headers?: RawMessagePartHeader[];
   mimeType?: string;
+  partId?: string;
   parts?: RawMessagePart[];
 }
 

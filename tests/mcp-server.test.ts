@@ -1026,6 +1026,7 @@ test("mcp tools/call list_gmail_attachments returns attachment metadata", async 
               {
                 filename: "report.csv",
                 mimeType: "text/csv",
+                partId: "1",
                 body: {
                   attachmentId: "att-001",
                   size: 18,
@@ -1034,6 +1035,7 @@ test("mcp tools/call list_gmail_attachments returns attachment metadata", async 
               {
                 filename: "scan.pdf",
                 mimeType: "application/pdf",
+                partId: "2",
                 body: {
                   attachmentId: "att-002",
                   size: 1024,
@@ -1064,17 +1066,17 @@ test("mcp tools/call list_gmail_attachments returns attachment metadata", async 
     message_id: "msg-001",
     attachments: [
       {
-        attachment_id: "att-001",
         filename: "report.csv",
         mime_type: "text/csv",
+        part_id: "1",
         size: 18,
         text_supported: true,
         text_format: "plain",
       },
       {
-        attachment_id: "att-002",
         filename: "scan.pdf",
         mime_type: "application/pdf",
+        part_id: "2",
         size: 1024,
         text_supported: false,
         text_format: "",
@@ -1113,6 +1115,7 @@ test("mcp tools/call read_gmail_attachment_text returns decoded text", async () 
               {
                 filename: "report.csv",
                 mimeType: "text/csv",
+                partId: "1",
                 headers: [
                   { name: "Content-Type", value: "text/csv; charset=utf-8" },
                 ],
@@ -1137,7 +1140,7 @@ test("mcp tools/call read_gmail_attachment_text returns decoded text", async () 
       name: "read_gmail_attachment_text",
       arguments: {
         message_id: "msg-001",
-        attachment_id: "att-001",
+        part_id: "1",
         max_bytes: 1024,
         max_chars: 12,
       },
@@ -1145,10 +1148,10 @@ test("mcp tools/call read_gmail_attachment_text returns decoded text", async () 
   });
 
   assert.deepEqual((response as { result: { structuredContent: unknown } }).result.structuredContent, {
-    attachment_id: "att-001",
     filename: "report.csv",
     message_id: "msg-001",
     mime_type: "text/csv",
+    part_id: "1",
     size: 28,
     text: "date,tota...",
     text_chars: 12,
@@ -1176,7 +1179,8 @@ test("mcp tools/call download_gmail_attachment saves a local file and returns me
         async listMessageIds() {
           return [];
         },
-        async getAttachment() {
+        async getAttachment(_messageId: string, attachmentId: string) {
+          assert.equal(attachmentId, "att-current");
           return {
             data: Buffer.from("PDF bytes", "utf-8").toString("base64url"),
             size: 9,
@@ -1190,8 +1194,9 @@ test("mcp tools/call download_gmail_attachment saves a local file and returns me
                 {
                   filename: "../report.pdf",
                   mimeType: "application/pdf",
+                  partId: "1",
                   body: {
-                    attachmentId: "att-001",
+                    attachmentId: "att-current",
                     size: 9,
                   },
                 },
@@ -1211,7 +1216,7 @@ test("mcp tools/call download_gmail_attachment saves a local file and returns me
         name: "download_gmail_attachment",
         arguments: {
           message_id: "msg-001",
-          attachment_id: "att-001",
+          part_id: "1",
           download_dir: tempDir,
         },
       },
@@ -1220,13 +1225,13 @@ test("mcp tools/call download_gmail_attachment saves a local file and returns me
     const savedPath = structuredContent.saved_path as string;
 
     assert.equal(readFileSync(savedPath, "utf-8"), "PDF bytes");
-    assert.equal(savedPath, path.join(tempDir, "att-001-report.pdf"));
+    assert.equal(savedPath, path.join(tempDir, "1-report.pdf"));
     assert.deepEqual(structuredContent, {
-      attachment_id: "att-001",
       content_returned: false,
       filename: "../report.pdf",
       message_id: "msg-001",
       mime_type: "application/pdf",
+      part_id: "1",
       saved_path: savedPath,
       sha256: "662f0631667382600d18269aeb84b04987b60124d1371b34cd783ae06cbe656c",
       size: 9,

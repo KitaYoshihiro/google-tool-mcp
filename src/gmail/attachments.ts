@@ -4,9 +4,9 @@ import { htmlToText, truncateText, type RawMessagePart, type RawMessagePartBody 
 import type { RawGmailMessage } from "./messages";
 
 export interface GmailAttachment {
-  attachment_id: string;
   filename: string;
   mime_type: string;
+  part_id: string;
   size: number;
   text_supported: boolean;
   text_format: string;
@@ -19,10 +19,10 @@ export interface GmailAttachmentList {
 }
 
 export interface GmailAttachmentText {
-  attachment_id: string;
   filename: string;
   message_id: string;
   mime_type: string;
+  part_id: string;
   size: number;
   text: string;
   text_chars: number;
@@ -31,6 +31,12 @@ export interface GmailAttachmentText {
 }
 
 type AttachmentTextFormat = "html" | "json" | "plain";
+
+interface AttachmentPartResolution {
+  attachmentId: string;
+  metadata: GmailAttachment;
+  part: RawMessagePart;
+}
 
 const PLAIN_TEXT_MIME_TYPES = new Set([
   "application/xml",
@@ -113,9 +119,10 @@ function getTextFormat(mimeType: string, filename: string): AttachmentTextFormat
   return null;
 }
 
-function mapAttachmentPart(part: RawMessagePart): GmailAttachment | null {
+function mapAttachmentPart(part: RawMessagePart): AttachmentPartResolution | null {
   const attachmentId = part.body?.attachmentId;
-  if (!attachmentId) {
+  const partId = part.partId;
+  if (!attachmentId || !partId) {
     return null;
   }
 
@@ -124,12 +131,16 @@ function mapAttachmentPart(part: RawMessagePart): GmailAttachment | null {
   const textFormat = getTextFormat(mimeType, filename);
 
   return {
-    attachment_id: attachmentId,
-    filename,
-    mime_type: mimeType,
-    size: part.body?.size ?? 0,
-    text_supported: textFormat !== null,
-    text_format: textFormat ?? "",
+    attachmentId,
+    metadata: {
+      filename,
+      mime_type: mimeType,
+      part_id: partId,
+      size: part.body?.size ?? 0,
+      text_supported: textFormat !== null,
+      text_format: textFormat ?? "",
+    },
+    part,
   };
 }
 
@@ -137,7 +148,8 @@ export function listGmailAttachments(message: RawGmailMessage): GmailAttachmentL
   const attachments = message.payload
     ? [...iterateParts(message.payload)]
         .map(mapAttachmentPart)
-        .filter((attachment): attachment is GmailAttachment => attachment !== null)
+        .filter((attachment): attachment is AttachmentPartResolution => attachment !== null)
+        .map((attachment) => attachment.metadata)
     : [];
 
   return {
@@ -147,27 +159,20 @@ export function listGmailAttachments(message: RawGmailMessage): GmailAttachmentL
   };
 }
 
-export function findGmailAttachment(
+export function findGmailAttachmentPart(
   message: RawGmailMessage,
-  attachmentId: string,
-): GmailAttachment | null {
-  return listGmailAttachments(message).attachments.find(
-    (attachment) => attachment.attachment_id === attachmentId,
-  ) ?? null;
-}
-
-function findAttachmentPart(
-  message: RawGmailMessage,
-  attachmentId: string,
-): RawMessagePart | null {
+  partId: string,
+): AttachmentPartResolution | null {
   if (!message.payload) {
     return null;
   }
 
   for (const part of iterateParts(message.payload)) {
-    if (part.body?.attachmentId === attachmentId) {
-      return part;
+    if (part.partId !== partId) {
+      continue;
     }
+
+    return mapAttachmentPart(part);
   }
 
   return null;
@@ -220,21 +225,17 @@ function convertAttachmentText(
 
 export function readGmailAttachmentText(options: {
   attachment: RawMessagePartBody;
-  attachmentId: string;
   maxBytes: number;
   maxChars: number;
   message: RawGmailMessage;
+  partId: string;
 }): GmailAttachmentText {
-  const part = findAttachmentPart(options.message, options.attachmentId);
-  if (!part) {
-    throw new Error(`Attachment was not found in message: ${options.attachmentId}`);
+  const attachmentPart = findGmailAttachmentPart(options.message, options.partId);
+  if (!attachmentPart) {
+    throw new Error(`Attachment part was not found in message: ${options.partId}`);
   }
 
-  const metadata = mapAttachmentPart(part);
-  if (!metadata) {
-    throw new Error(`Attachment was not found in message: ${options.attachmentId}`);
-  }
-
+  const { metadata, part } = attachmentPart;
   const mimeType = metadata.mime_type;
   const format = getTextFormat(mimeType, metadata.filename);
   if (!format) {
@@ -244,7 +245,7 @@ export function readGmailAttachmentText(options: {
   }
 
   if (!options.attachment.data) {
-    throw new Error(`Attachment data was not returned for: ${options.attachmentId}`);
+    throw new Error(`Attachment data was not returned for part: ${options.partId}`);
   }
 
   const buffer = Buffer.from(options.attachment.data, "base64url");
@@ -261,10 +262,10 @@ export function readGmailAttachmentText(options: {
   const truncated = truncateText(converted, options.maxChars);
 
   return {
-    attachment_id: options.attachmentId,
     filename: metadata.filename,
     message_id: options.message.id ?? "",
     mime_type: mimeType,
+    part_id: metadata.part_id,
     size: options.attachment.size ?? metadata.size,
     text: truncated.value,
     text_chars: truncated.value.length,

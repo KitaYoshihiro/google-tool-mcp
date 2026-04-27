@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listGmailAttachments = listGmailAttachments;
-exports.findGmailAttachment = findGmailAttachment;
+exports.findGmailAttachmentPart = findGmailAttachmentPart;
 exports.readGmailAttachmentText = readGmailAttachmentText;
 const node_util_1 = require("node:util");
 const body_1 = require("./body");
@@ -71,19 +71,24 @@ function getTextFormat(mimeType, filename) {
 }
 function mapAttachmentPart(part) {
     const attachmentId = part.body?.attachmentId;
-    if (!attachmentId) {
+    const partId = part.partId;
+    if (!attachmentId || !partId) {
         return null;
     }
     const filename = part.filename ?? "";
     const mimeType = normalizeMimeType(part.mimeType);
     const textFormat = getTextFormat(mimeType, filename);
     return {
-        attachment_id: attachmentId,
-        filename,
-        mime_type: mimeType,
-        size: part.body?.size ?? 0,
-        text_supported: textFormat !== null,
-        text_format: textFormat ?? "",
+        attachmentId,
+        metadata: {
+            filename,
+            mime_type: mimeType,
+            part_id: partId,
+            size: part.body?.size ?? 0,
+            text_supported: textFormat !== null,
+            text_format: textFormat ?? "",
+        },
+        part,
     };
 }
 function listGmailAttachments(message) {
@@ -91,6 +96,7 @@ function listGmailAttachments(message) {
         ? [...iterateParts(message.payload)]
             .map(mapAttachmentPart)
             .filter((attachment) => attachment !== null)
+            .map((attachment) => attachment.metadata)
         : [];
     return {
         count: attachments.length,
@@ -98,17 +104,15 @@ function listGmailAttachments(message) {
         attachments,
     };
 }
-function findGmailAttachment(message, attachmentId) {
-    return listGmailAttachments(message).attachments.find((attachment) => attachment.attachment_id === attachmentId) ?? null;
-}
-function findAttachmentPart(message, attachmentId) {
+function findGmailAttachmentPart(message, partId) {
     if (!message.payload) {
         return null;
     }
     for (const part of iterateParts(message.payload)) {
-        if (part.body?.attachmentId === attachmentId) {
-            return part;
+        if (part.partId !== partId) {
+            continue;
         }
+        return mapAttachmentPart(part);
     }
     return null;
 }
@@ -145,21 +149,18 @@ function convertAttachmentText(rawText, format) {
     return normalizeText(rawText);
 }
 function readGmailAttachmentText(options) {
-    const part = findAttachmentPart(options.message, options.attachmentId);
-    if (!part) {
-        throw new Error(`Attachment was not found in message: ${options.attachmentId}`);
+    const attachmentPart = findGmailAttachmentPart(options.message, options.partId);
+    if (!attachmentPart) {
+        throw new Error(`Attachment part was not found in message: ${options.partId}`);
     }
-    const metadata = mapAttachmentPart(part);
-    if (!metadata) {
-        throw new Error(`Attachment was not found in message: ${options.attachmentId}`);
-    }
+    const { metadata, part } = attachmentPart;
     const mimeType = metadata.mime_type;
     const format = getTextFormat(mimeType, metadata.filename);
     if (!format) {
         throw new Error(`Attachment is not a supported text type: ${mimeType || "(unknown)"}.`);
     }
     if (!options.attachment.data) {
-        throw new Error(`Attachment data was not returned for: ${options.attachmentId}`);
+        throw new Error(`Attachment data was not returned for part: ${options.partId}`);
     }
     const buffer = Buffer.from(options.attachment.data, "base64url");
     if (buffer.byteLength > options.maxBytes) {
@@ -171,10 +172,10 @@ function readGmailAttachmentText(options) {
     const converted = convertAttachmentText(decoded, format);
     const truncated = (0, body_1.truncateText)(converted, options.maxChars);
     return {
-        attachment_id: options.attachmentId,
         filename: metadata.filename,
         message_id: options.message.id ?? "",
         mime_type: mimeType,
+        part_id: metadata.part_id,
         size: options.attachment.size ?? metadata.size,
         text: truncated.value,
         text_chars: truncated.value.length,

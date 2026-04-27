@@ -45,7 +45,7 @@ import {
   type GmailApiClient,
 } from "../gmail/client";
 import {
-  findGmailAttachment,
+  findGmailAttachmentPart,
   listGmailAttachments,
   readGmailAttachmentText,
 } from "../gmail/attachments";
@@ -196,7 +196,7 @@ const GMAIL_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: "list_gmail_attachments",
-    description: "List attachments on one Gmail message.",
+    description: "List attachments on one Gmail message. Use the returned part_id, not Gmail's internal attachmentId, when reading or downloading an attachment.",
     inputSchema: {
       type: "object",
       properties: {
@@ -207,26 +207,32 @@ const GMAIL_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: "read_gmail_attachment_text",
-    description: "Read a supported text attachment from one Gmail message.",
+    description: "Read a supported text attachment from one Gmail message using the immutable part_id returned by list_gmail_attachments.",
     inputSchema: {
       type: "object",
       properties: {
         message_id: { type: "string" },
-        attachment_id: { type: "string" },
+        part_id: {
+          type: "string",
+          description: "Immutable Gmail message part ID returned by list_gmail_attachments.",
+        },
         max_bytes: { type: "integer", default: 1048576 },
         max_chars: { type: "integer", default: 5000 },
       },
-      required: ["message_id", "attachment_id"],
+      required: ["message_id", "part_id"],
     },
   },
   {
     name: "download_gmail_attachment",
-    description: "Download one Gmail attachment to a local file and return metadata only. The attachment content is not returned in the MCP response.",
+    description: "Download one Gmail attachment, selected by the immutable part_id returned by list_gmail_attachments, to a local file and return metadata only. The attachment content is not returned in the MCP response.",
     inputSchema: {
       type: "object",
       properties: {
         message_id: { type: "string" },
-        attachment_id: { type: "string" },
+        part_id: {
+          type: "string",
+          description: "Immutable Gmail message part ID returned by list_gmail_attachments.",
+        },
         download_dir: {
           type: "string",
           description: "Optional target directory. Defaults to a profile-specific cache directory under ~/.cache/google-tool/attachments/.",
@@ -240,7 +246,7 @@ const GMAIL_TOOL_DEFINITIONS: ToolDefinition[] = [
           default: false,
         },
       },
-      required: ["message_id", "attachment_id"],
+      required: ["message_id", "part_id"],
     },
   },
 ];
@@ -690,8 +696,8 @@ function buildAttachmentDownloadDir(
   );
 }
 
-function buildAttachmentFileName(attachmentId: string, filename: string): string {
-  return `${sanitizePathSegment(attachmentId, "attachment")}-${sanitizeFileName(filename)}`;
+function buildAttachmentFileName(partId: string, filename: string): string {
+  return `${sanitizePathSegment(partId, "attachment")}-${sanitizeFileName(filename)}`;
 }
 
 function appendFileNameSuffix(
@@ -1119,7 +1125,7 @@ async function callTool(
 
     if (toolName === "read_gmail_attachment_text") {
       const messageId = readString(toolArguments.message_id, "message_id");
-      const attachmentId = readString(toolArguments.attachment_id, "attachment_id");
+      const partId = readString(toolArguments.part_id, "part_id");
       const maxBytes = readInteger(toolArguments.max_bytes, "max_bytes", 1024 * 1024);
       const maxChars = readInteger(toolArguments.max_chars, "max_chars", 5000);
       const gmailClient = await createAuthorizedGmailClient(
@@ -1130,30 +1136,33 @@ async function callTool(
         dependencies,
       );
       const message = await gmailClient.getMessage(messageId);
-      const attachmentMetadata = findGmailAttachment(message, attachmentId);
-      if (!attachmentMetadata) {
-        throw new Error(`Attachment was not found in message: ${attachmentId}`);
+      const attachmentPart = findGmailAttachmentPart(message, partId);
+      if (!attachmentPart) {
+        throw new Error(`Attachment part was not found in message: ${partId}`);
       }
-      if (attachmentMetadata.size > maxBytes) {
+      if (attachmentPart.metadata.size > maxBytes) {
         throw new Error(
-          `Attachment is too large to read as text: ${attachmentMetadata.size} bytes exceeds max_bytes ${maxBytes}.`,
+          `Attachment is too large to read as text: ${attachmentPart.metadata.size} bytes exceeds max_bytes ${maxBytes}.`,
         );
       }
-      const attachment = await gmailClient.getAttachment(messageId, attachmentId);
+      const attachment = await gmailClient.getAttachment(
+        messageId,
+        attachmentPart.attachmentId,
+      );
       return buildToolSuccessResult(
         readGmailAttachmentText({
           attachment,
-          attachmentId,
           maxBytes,
           maxChars,
           message,
+          partId,
         }),
       );
     }
 
     if (toolName === "download_gmail_attachment") {
       const messageId = readString(toolArguments.message_id, "message_id");
-      const attachmentId = readString(toolArguments.attachment_id, "attachment_id");
+      const partId = readString(toolArguments.part_id, "part_id");
       const downloadDir = readString(toolArguments.download_dir, "download_dir", "");
       const maxBytes = readInteger(
         toolArguments.max_bytes,
@@ -1169,19 +1178,22 @@ async function callTool(
         dependencies,
       );
       const message = await gmailClient.getMessage(messageId);
-      const attachmentMetadata = findGmailAttachment(message, attachmentId);
-      if (!attachmentMetadata) {
-        throw new Error(`Attachment was not found in message: ${attachmentId}`);
+      const attachmentPart = findGmailAttachmentPart(message, partId);
+      if (!attachmentPart) {
+        throw new Error(`Attachment part was not found in message: ${partId}`);
       }
-      if (attachmentMetadata.size > maxBytes) {
+      if (attachmentPart.metadata.size > maxBytes) {
         throw new Error(
-          `Attachment is too large to download: ${attachmentMetadata.size} bytes exceeds max_bytes ${maxBytes}.`,
+          `Attachment is too large to download: ${attachmentPart.metadata.size} bytes exceeds max_bytes ${maxBytes}.`,
         );
       }
 
-      const attachment = await gmailClient.getAttachment(messageId, attachmentId);
+      const attachment = await gmailClient.getAttachment(
+        messageId,
+        attachmentPart.attachmentId,
+      );
       if (!attachment.data) {
-        throw new Error(`Attachment data was not returned for: ${attachmentId}`);
+        throw new Error(`Attachment data was not returned for part: ${partId}`);
       }
 
       const buffer = Buffer.from(attachment.data, "base64url");
@@ -1198,17 +1210,17 @@ async function callTool(
         platform: pathContext.platform,
         targetDir,
         targetFileName: buildAttachmentFileName(
-          attachmentId,
-          attachmentMetadata.filename,
+          partId,
+          attachmentPart.metadata.filename,
         ),
       });
 
       return buildToolSuccessResult({
-        attachment_id: attachmentId,
         content_returned: false,
-        filename: attachmentMetadata.filename,
+        filename: attachmentPart.metadata.filename,
         message_id: messageId,
-        mime_type: attachmentMetadata.mime_type,
+        mime_type: attachmentPart.metadata.mime_type,
+        part_id: partId,
         saved_path: savedPath,
         sha256: createHash("sha256").update(buffer).digest("hex"),
         size: buffer.byteLength,

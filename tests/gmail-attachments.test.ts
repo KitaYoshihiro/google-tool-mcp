@@ -18,6 +18,7 @@ test("listGmailAttachments extracts text support metadata", () => {
         {
           filename: "notes.txt",
           mimeType: "application/octet-stream",
+          partId: "1",
           body: {
             attachmentId: "att-001",
             size: 12,
@@ -26,6 +27,7 @@ test("listGmailAttachments extracts text support metadata", () => {
         {
           filename: "invoice.pdf",
           mimeType: "application/pdf",
+          partId: "2",
           body: {
             attachmentId: "att-002",
             size: 1024,
@@ -40,17 +42,17 @@ test("listGmailAttachments extracts text support metadata", () => {
     message_id: "msg-001",
     attachments: [
       {
-        attachment_id: "att-001",
         filename: "notes.txt",
         mime_type: "application/octet-stream",
+        part_id: "1",
         size: 12,
         text_supported: true,
         text_format: "plain",
       },
       {
-        attachment_id: "att-002",
         filename: "invoice.pdf",
         mime_type: "application/pdf",
+        part_id: "2",
         size: 1024,
         text_supported: false,
         text_format: "",
@@ -67,6 +69,7 @@ test("readGmailAttachmentText decodes supported text attachments", () => {
         {
           filename: "summary.html",
           mimeType: "text/html",
+          partId: "1",
           headers: [
             { name: "Content-Type", value: "text/html; charset=utf-8" },
           ],
@@ -81,9 +84,9 @@ test("readGmailAttachmentText decodes supported text attachments", () => {
 
   const result = readGmailAttachmentText({
     message,
-    attachmentId: "att-001",
     maxBytes: 1024,
     maxChars: 100,
+    partId: "1",
     attachment: {
       data: encodeAttachment("<p>Hello<br>Team &amp; Friends</p>"),
       size: 32,
@@ -91,10 +94,10 @@ test("readGmailAttachmentText decodes supported text attachments", () => {
   });
 
   assert.deepEqual(result, {
-    attachment_id: "att-001",
     filename: "summary.html",
     message_id: "msg-001",
     mime_type: "text/html",
+    part_id: "1",
     size: 32,
     text: "Hello\nTeam & Friends",
     text_chars: 20,
@@ -112,15 +115,16 @@ test("readGmailAttachmentText rejects unsupported attachment types", () => {
           payload: {
             filename: "scan.pdf",
             mimeType: "application/pdf",
+            partId: "1",
             body: {
               attachmentId: "att-001",
               size: 1024,
             },
           },
         },
-        attachmentId: "att-001",
         maxBytes: 1024,
         maxChars: 100,
+        partId: "1",
         attachment: {
           data: encodeAttachment("%PDF"),
           size: 1024,
