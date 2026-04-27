@@ -1,3 +1,4 @@
+import type { RawMessagePartBody } from "./body";
 import type { RawGmailMessage } from "./messages";
 import type { GmailLabel } from "./labels";
 
@@ -12,6 +13,7 @@ export class GmailApiError extends Error {
 }
 
 export interface GmailApiClient {
+  getAttachment(messageId: string, attachmentId: string): Promise<RawMessagePartBody>;
   getProfile(): Promise<{
     emailAddress?: string;
   }>;
@@ -173,6 +175,18 @@ export function createGmailApiClient(options: {
         options.getRequestHeaders,
         url.toString(),
       )) as RawGmailMessage;
+    },
+
+    async getAttachment(
+      messageId: string,
+      attachmentId: string,
+    ): Promise<RawMessagePartBody> {
+      const url = `${baseUrl}/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`;
+      return (await requestJson(
+        fetchLike,
+        options.getRequestHeaders,
+        url,
+      )) as RawMessagePartBody;
     },
   };
 }

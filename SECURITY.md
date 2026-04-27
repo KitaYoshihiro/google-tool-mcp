@@ -2,6 +2,8 @@
 
 google-tool-mcp は Gmail と Google Drive に read-only でアクセスします。利用前に、このファイルの認証情報と権限の扱いを確認してください。
 
+Gmail ではメッセージ本文に加えて、明示的に指定した対応テキスト添付ファイルの内容を読み取れます。PDF、Office 文書、画像、zip などのバイナリ添付ファイルは読み取りません。
+
 ## 要求する OAuth scope
 
 このツールは以下の scope を要求します。

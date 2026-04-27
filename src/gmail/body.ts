@@ -1,9 +1,18 @@
 export interface RawMessagePartBody {
+  attachmentId?: string;
   data?: string;
+  size?: number;
+}
+
+export interface RawMessagePartHeader {
+  name?: string;
+  value?: string;
 }
 
 export interface RawMessagePart {
   body?: RawMessagePartBody;
+  filename?: string;
+  headers?: RawMessagePartHeader[];
   mimeType?: string;
   parts?: RawMessagePart[];
 }

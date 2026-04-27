@@ -89,7 +89,7 @@ test("mcp initialize returns tools capability and instructions", async () => {
         version: "0.1.0",
       },
       instructions:
-        "Read Gmail messages and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
+        "Read Gmail messages, supported Gmail text attachments, and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
     },
   });
 });
@@ -123,7 +123,7 @@ test("mcp initialize accepts older supported protocol versions", async () => {
         version: "0.1.0",
       },
       instructions:
-        "Read Gmail messages and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
+        "Read Gmail messages, supported Gmail text attachments, and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
     },
   });
 });
@@ -157,7 +157,7 @@ test("mcp initialize falls back to the latest supported protocol version for unk
         version: "0.1.0",
       },
       instructions:
-        "Read Gmail messages and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
+        "Read Gmail messages, supported Gmail text attachments, and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
     },
   });
 });
@@ -179,6 +179,8 @@ test("mcp tools/list returns the expected tool definitions", async () => {
     "list_gmail_messages",
     "list_gmail_labels",
     "read_gmail_message",
+    "list_gmail_attachments",
+    "read_gmail_attachment_text",
     "get_drive_about",
     "list_drive_files",
     "read_drive_file",
@@ -993,6 +995,164 @@ test("mcp tools/call read_gmail_message uses include_body=true and body_chars=50
   });
 });
 
+test("mcp tools/call list_gmail_attachments returns attachment metadata", async () => {
+  const handler = createMcpProtocolHandler({
+    ...configuredCredentialDependencies(),
+    ensureAuthorizedToken: async () => ({
+      source: "saved",
+      token: {
+        access_token: "access-token",
+      },
+    }),
+    createGmailClient: async () => ({
+      async listLabels() {
+        return [];
+      },
+      async listMessageIds() {
+        return [];
+      },
+      async getAttachment() {
+        throw new Error("not needed");
+      },
+      async getMessage() {
+        return {
+          id: "msg-001",
+          payload: {
+            parts: [
+              {
+                filename: "report.csv",
+                mimeType: "text/csv",
+                body: {
+                  attachmentId: "att-001",
+                  size: 18,
+                },
+              },
+              {
+                filename: "scan.pdf",
+                mimeType: "application/pdf",
+                body: {
+                  attachmentId: "att-002",
+                  size: 1024,
+                },
+              },
+            ],
+          },
+        };
+      },
+    }),
+  });
+  await initializeHandler(handler);
+
+  const response = await handler.handleMessage({
+    jsonrpc: "2.0",
+    id: 25,
+    method: "tools/call",
+    params: {
+      name: "list_gmail_attachments",
+      arguments: {
+        message_id: "msg-001",
+      },
+    },
+  });
+
+  assert.deepEqual((response as { result: { structuredContent: unknown } }).result.structuredContent, {
+    count: 2,
+    message_id: "msg-001",
+    attachments: [
+      {
+        attachment_id: "att-001",
+        filename: "report.csv",
+        mime_type: "text/csv",
+        size: 18,
+        text_supported: true,
+        text_format: "plain",
+      },
+      {
+        attachment_id: "att-002",
+        filename: "scan.pdf",
+        mime_type: "application/pdf",
+        size: 1024,
+        text_supported: false,
+        text_format: "",
+      },
+    ],
+  });
+});
+
+test("mcp tools/call read_gmail_attachment_text returns decoded text", async () => {
+  const handler = createMcpProtocolHandler({
+    ...configuredCredentialDependencies(),
+    ensureAuthorizedToken: async () => ({
+      source: "saved",
+      token: {
+        access_token: "access-token",
+      },
+    }),
+    createGmailClient: async () => ({
+      async listLabels() {
+        return [];
+      },
+      async listMessageIds() {
+        return [];
+      },
+      async getAttachment() {
+        return {
+          data: Buffer.from("date,total\n2026-04-27,1000\n", "utf-8").toString("base64url"),
+          size: 28,
+        };
+      },
+      async getMessage() {
+        return {
+          id: "msg-001",
+          payload: {
+            parts: [
+              {
+                filename: "report.csv",
+                mimeType: "text/csv",
+                headers: [
+                  { name: "Content-Type", value: "text/csv; charset=utf-8" },
+                ],
+                body: {
+                  attachmentId: "att-001",
+                  size: 28,
+                },
+              },
+            ],
+          },
+        };
+      },
+    }),
+  });
+  await initializeHandler(handler);
+
+  const response = await handler.handleMessage({
+    jsonrpc: "2.0",
+    id: 26,
+    method: "tools/call",
+    params: {
+      name: "read_gmail_attachment_text",
+      arguments: {
+        message_id: "msg-001",
+        attachment_id: "att-001",
+        max_bytes: 1024,
+        max_chars: 12,
+      },
+    },
+  });
+
+  assert.deepEqual((response as { result: { structuredContent: unknown } }).result.structuredContent, {
+    attachment_id: "att-001",
+    filename: "report.csv",
+    message_id: "msg-001",
+    mime_type: "text/csv",
+    size: 28,
+    text: "date,tota...",
+    text_chars: 12,
+    text_format: "plain",
+    text_truncated: true,
+  });
+});
+
 test("mcp tools/call get_drive_about returns structured content", async () => {
   const handler = createMcpProtocolHandler({
     ...configuredCredentialDependencies(),
@@ -1373,6 +1533,8 @@ test("mcp tools/list hides Drive tools when drive is disabled", async () => {
     "list_gmail_messages",
     "list_gmail_labels",
     "read_gmail_message",
+    "list_gmail_attachments",
+    "read_gmail_attachment_text",
   ]);
 });
 
@@ -1556,6 +1718,8 @@ test("runMcpServer speaks newline-delimited JSON stdio", async () => {
       "list_gmail_messages",
       "list_gmail_labels",
       "read_gmail_message",
+      "list_gmail_attachments",
+      "read_gmail_attachment_text",
       "get_drive_about",
       "list_drive_files",
       "read_drive_file",
@@ -1663,7 +1827,7 @@ test("runMcpServer emits OAuth guidance when a tool call starts browser auth", a
           version: "0.1.0",
         },
         instructions:
-          "Read Gmail messages and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
+          "Read Gmail messages, supported Gmail text attachments, and Google Drive file metadata from the authorized account. If OAuth is not initialized, configure credentials first: place credentials.json in the config directory or set GOOGLE_TOOL_CREDENTIALS. GOOGLE_TOOL_PROFILE selects a profile, GOOGLE_TOOL_TOKEN can point to an existing token, and the first tool call can launch browser auth after credentials are configured.",
       },
     },
     {

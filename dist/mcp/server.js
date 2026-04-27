@@ -12,6 +12,7 @@ const files_1 = require("../drive/files");
 const client_1 = require("../drive/client");
 const paths_1 = require("../config/paths");
 const client_2 = require("../gmail/client");
+const attachments_1 = require("../gmail/attachments");
 const labels_1 = require("../gmail/labels");
 const messages_1 = require("../gmail/messages");
 exports.MCP_NOT_IMPLEMENTED_EXIT_CODE = 1;
@@ -61,6 +62,31 @@ const GMAIL_TOOL_DEFINITIONS = [
                 body_chars: { type: "integer", default: 5000 },
             },
             required: ["message_id"],
+        },
+    },
+    {
+        name: "list_gmail_attachments",
+        description: "List attachments on one Gmail message.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                message_id: { type: "string" },
+            },
+            required: ["message_id"],
+        },
+    },
+    {
+        name: "read_gmail_attachment_text",
+        description: "Read a supported text attachment from one Gmail message.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                message_id: { type: "string" },
+                attachment_id: { type: "string" },
+                max_bytes: { type: "integer", default: 1048576 },
+                max_chars: { type: "integer", default: 5000 },
+            },
+            required: ["message_id", "attachment_id"],
         },
     },
 ];
@@ -120,9 +146,9 @@ const GMAIL_TOOL_NAMES = new Set(GMAIL_TOOL_DEFINITIONS.map((tool) => tool.name)
 const DRIVE_TOOL_NAMES = new Set(DRIVE_TOOL_DEFINITIONS.map((tool) => tool.name));
 function getInstructions(features) {
     const capabilitySentence = features.gmailEnabled && features.driveEnabled
-        ? "Read Gmail messages and Google Drive file metadata from the authorized account. "
+        ? "Read Gmail messages, supported Gmail text attachments, and Google Drive file metadata from the authorized account. "
         : features.gmailEnabled
-            ? "Read Gmail messages from the authorized account. "
+            ? "Read Gmail messages and supported Gmail text attachments from the authorized account. "
             : features.driveEnabled
                 ? "Read Google Drive file metadata from the authorized account. "
                 : "All Gmail and Drive tool groups are disabled by server configuration. ";
@@ -576,6 +602,38 @@ async function callTool(toolName, toolArguments, dependencies) {
             return buildToolSuccessResult((0, messages_1.mapRawMessage)(rawMessage, {
                 includeBody,
                 bodyChars,
+            }));
+        }
+        if (toolName === "list_gmail_attachments") {
+            const messageId = readString(toolArguments.message_id, "message_id");
+            const gmailClient = await createAuthorizedGmailClient(configuredPaths.credentialsPath, await authorizeForTool(configuredPaths, features, dependencies, {
+                scopes: [constants_1.GMAIL_READONLY_SCOPE],
+            }), dependencies);
+            return buildToolSuccessResult((0, attachments_1.listGmailAttachments)(await gmailClient.getMessage(messageId)));
+        }
+        if (toolName === "read_gmail_attachment_text") {
+            const messageId = readString(toolArguments.message_id, "message_id");
+            const attachmentId = readString(toolArguments.attachment_id, "attachment_id");
+            const maxBytes = readInteger(toolArguments.max_bytes, "max_bytes", 1024 * 1024);
+            const maxChars = readInteger(toolArguments.max_chars, "max_chars", 5000);
+            const gmailClient = await createAuthorizedGmailClient(configuredPaths.credentialsPath, await authorizeForTool(configuredPaths, features, dependencies, {
+                scopes: [constants_1.GMAIL_READONLY_SCOPE],
+            }), dependencies);
+            const message = await gmailClient.getMessage(messageId);
+            const attachmentMetadata = (0, attachments_1.findGmailAttachment)(message, attachmentId);
+            if (!attachmentMetadata) {
+                throw new Error(`Attachment was not found in message: ${attachmentId}`);
+            }
+            if (attachmentMetadata.size > maxBytes) {
+                throw new Error(`Attachment is too large to read as text: ${attachmentMetadata.size} bytes exceeds max_bytes ${maxBytes}.`);
+            }
+            const attachment = await gmailClient.getAttachment(messageId, attachmentId);
+            return buildToolSuccessResult((0, attachments_1.readGmailAttachmentText)({
+                attachment,
+                attachmentId,
+                maxBytes,
+                maxChars,
+                message,
             }));
         }
         if (toolName === "get_drive_about") {

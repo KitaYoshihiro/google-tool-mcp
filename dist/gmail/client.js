@@ -82,5 +82,9 @@ function createGmailApiClient(options) {
             url.searchParams.set("format", "full");
             return (await requestJson(fetchLike, options.getRequestHeaders, url.toString()));
         },
+        async getAttachment(messageId, attachmentId) {
+            const url = `${baseUrl}/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`;
+            return (await requestJson(fetchLike, options.getRequestHeaders, url));
+        },
     };
 }

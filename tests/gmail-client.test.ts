@@ -196,6 +196,44 @@ test("gmail client loads a full message by id", async () => {
   ]);
 });
 
+test("gmail client loads an attachment by id", async () => {
+  const requests: string[] = [];
+
+  const client = createGmailApiClient({
+    getRequestHeaders: async () => ({
+      authorization: "Bearer access-token",
+    }),
+    fetch: async (url) => {
+      requests.push(url);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            attachmentId: "att-001",
+            data: "aGVsbG8",
+            size: 5,
+          };
+        },
+        async text() {
+          return "";
+        },
+      };
+    },
+  });
+
+  const attachment = await client.getAttachment("msg-001", "att-001");
+
+  assert.deepEqual(attachment, {
+    attachmentId: "att-001",
+    data: "aGVsbG8",
+    size: 5,
+  });
+  assert.deepEqual(requests, [
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-001/attachments/att-001",
+  ]);
+});
+
 test("gmail client surfaces non-2xx responses as GmailApiError", async () => {
   const client = createGmailApiClient({
     getRequestHeaders: async () => ({
