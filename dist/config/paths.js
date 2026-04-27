@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveProfileName = resolveProfileName;
 exports.getDefaultConfigDir = getDefaultConfigDir;
+exports.getDefaultCacheDir = getDefaultCacheDir;
 exports.getSharedConfigDir = getSharedConfigDir;
 exports.getDefaultCredentialPaths = getDefaultCredentialPaths;
 exports.getSharedCredentialPaths = getSharedCredentialPaths;
@@ -61,6 +62,13 @@ function getDefaultConfigDir(context = {}) {
     const platform = getPlatform(context.platform);
     const profileName = resolveProfileName(context);
     return getConfigDirForProfile(homeDir, platform, profileName);
+}
+function getDefaultCacheDir(context = {}) {
+    const env = getEnv(context.env);
+    const homeDir = getHomeDir(context.homeDir, env);
+    const platform = getPlatform(context.platform);
+    const pathModule = getPathModule(platform, homeDir);
+    return pathModule.join(homeDir, ".cache", constants_1.APP_NAME);
 }
 function getSharedConfigDir(context = {}) {
     const env = getEnv(context.env);

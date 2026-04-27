@@ -3,6 +3,7 @@
 Google Tool は、Gmail のメッセージと Google Drive のファイル metadata を AI エージェントから参照するための MCP サーバーです。補助用の CLI も同梱しています。
 
 - Gmail のメッセージ一覧、ラベル一覧、メッセージ本文、対応するテキスト添付ファイルを read-only で取得できます
+- Gmail の添付ファイルをローカルファイルとしてダウンロードできます
 - Google Drive のアカウント情報、ファイル一覧、ファイル metadata を read-only で取得できます
 - Google Drive のファイル本文はダウンロードしません
 - Gmail や Drive への書き込み、変更、削除は行いません
@@ -139,11 +140,20 @@ enabled = true
 - `read_gmail_message`: Gmail メッセージを 1 件取得します
 - `list_gmail_attachments`: Gmail メッセージ 1 件の添付ファイル一覧を取得します
 - `read_gmail_attachment_text`: 対応するテキスト添付ファイルを読み取ります
+- `download_gmail_attachment`: Gmail 添付ファイルをローカルに保存します
 - `get_drive_about`: Google Drive のアカウント情報と容量を取得します
 - `list_drive_files`: Google Drive のファイル metadata 一覧を取得します
 - `read_drive_file`: Google Drive のファイル metadata を 1 件取得します
 
 `read_gmail_attachment_text` は、明示した `message_id` と `attachment_id` の添付ファイルだけを読み取ります。対応する形式は、`text/plain`、`text/csv`、`text/tab-separated-values`、`text/html`、`text/markdown`、`application/json`、`application/xml`、`text/xml` と、同等の拡張子を持つテキストファイルです。PDF、Office 文書、画像、zip などのバイナリ添付ファイルは読み取りません。既定では `max_bytes=1048576`、`max_chars=5000` で読み取り量と返却量を制限します。
+
+`download_gmail_attachment` は添付ファイル本文を MCP レスポンスには含めず、ローカルファイルとして保存して `saved_path`、`sha256`、MIME type、サイズなどの metadata だけを返します。`download_dir` を指定しない場合、既定では以下の profile 別キャッシュディレクトリに自動保存します。
+
+```text
+~/.cache/google-tool/attachments/<profile-or-default>/<message-id>/
+```
+
+既定では `max_bytes=26214400` でダウンロードサイズを制限し、同名ファイルがある場合は上書きせず suffix を付けて保存します。上書きしたい場合だけ `overwrite=true` を指定してください。
 
 `list_drive_files.query` には Google Drive API の `files.list.q` をそのまま渡します。
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import {
+  getDefaultCacheDir,
   getDefaultConfigDir,
   getDefaultCredentialPaths,
   getSharedCredentialPaths,
@@ -39,6 +40,16 @@ test("default config dir uses ~/.config on Linux", () => {
   });
 
   assert.equal(configDir, path.posix.join("/home/alice", ".config", "google-tool"));
+});
+
+test("default cache dir uses ~/.cache without profile nesting", () => {
+  const cacheDir = getDefaultCacheDir({
+    platform: "linux",
+    homeDir: "/home/alice",
+    env: { GOOGLE_TOOL_PROFILE: "work" },
+  });
+
+  assert.equal(cacheDir, path.posix.join("/home/alice", ".cache", "google-tool"));
 });
 
 test("default config dir ignores XDG_CONFIG_HOME and stays under ~/.config", () => {

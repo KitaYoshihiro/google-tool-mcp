@@ -1,10 +1,15 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MCP_NOT_IMPLEMENTED_EXIT_CODE = void 0;
 exports.parseMcpServerArgs = parseMcpServerArgs;
 exports.createMcpProtocolHandler = createMcpProtocolHandler;
 exports.runMcpServer = runMcpServer;
+const node_crypto_1 = require("node:crypto");
 const promises_1 = require("node:fs/promises");
+const node_path_1 = __importDefault(require("node:path"));
 const node_readline_1 = require("node:readline");
 const googleAuth_1 = require("../auth/googleAuth");
 const constants_1 = require("../config/constants");
@@ -25,6 +30,7 @@ const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
 const MCP_PROTOCOL_VERSION = SUPPORTED_MCP_PROTOCOL_VERSIONS[0];
 const MCP_SERVER_NAME = "google-tool";
 const MCP_SERVER_VERSION = "0.1.0";
+const DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const GMAIL_TOOL_DEFINITIONS = [
     {
         name: "list_gmail_messages",
@@ -85,6 +91,30 @@ const GMAIL_TOOL_DEFINITIONS = [
                 attachment_id: { type: "string" },
                 max_bytes: { type: "integer", default: 1048576 },
                 max_chars: { type: "integer", default: 5000 },
+            },
+            required: ["message_id", "attachment_id"],
+        },
+    },
+    {
+        name: "download_gmail_attachment",
+        description: "Download one Gmail attachment to a local file and return metadata only. The attachment content is not returned in the MCP response.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                message_id: { type: "string" },
+                attachment_id: { type: "string" },
+                download_dir: {
+                    type: "string",
+                    description: "Optional target directory. Defaults to a profile-specific cache directory under ~/.cache/google-tool/attachments/.",
+                },
+                max_bytes: {
+                    type: "integer",
+                    default: DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES,
+                },
+                overwrite: {
+                    type: "boolean",
+                    default: false,
+                },
             },
             required: ["message_id", "attachment_id"],
         },
@@ -376,6 +406,67 @@ function readCorpora(value, fieldName, fallback) {
     }
     return corpora;
 }
+function getPathModuleForTarget(targetPath, platform) {
+    return platform === "win32" || targetPath.includes("\\") ? node_path_1.default.win32 : node_path_1.default.posix;
+}
+function sanitizePathSegment(value, fallback) {
+    const sanitized = value
+        .trim()
+        .replace(/[\u0000-\u001f\u007f/\\:<>|?*]+/gu, "-")
+        .replace(/\s+/gu, " ")
+        .replace(/[. ]+$/gu, "")
+        .slice(0, 128);
+    if (!sanitized || sanitized === "." || sanitized === "..") {
+        return fallback;
+    }
+    return sanitized;
+}
+function sanitizeFileName(filename) {
+    const normalizedFileName = filename.trim().replace(/\\/gu, "/");
+    const segments = normalizedFileName.split("/").filter(Boolean);
+    return sanitizePathSegment(segments[segments.length - 1] ?? filename, "attachment");
+}
+function buildAttachmentDownloadDir(pathContext, downloadDir, messageId) {
+    if (downloadDir.trim()) {
+        return downloadDir;
+    }
+    const cacheDir = (0, paths_1.getDefaultCacheDir)(pathContext);
+    const pathModule = getPathModuleForTarget(cacheDir, pathContext.platform);
+    const profileName = (0, paths_1.resolveProfileName)(pathContext) ?? "default";
+    return pathModule.join(cacheDir, "attachments", sanitizePathSegment(profileName, "default"), sanitizePathSegment(messageId, "message"));
+}
+function buildAttachmentFileName(attachmentId, filename) {
+    return `${sanitizePathSegment(attachmentId, "attachment")}-${sanitizeFileName(filename)}`;
+}
+function appendFileNameSuffix(pathModule, filePath, suffix) {
+    const parsed = pathModule.parse(filePath);
+    return pathModule.join(parsed.dir, `${parsed.name}-${suffix}${parsed.ext}`);
+}
+async function writeAttachmentFile(options) {
+    await (0, promises_1.mkdir)(options.targetDir, { recursive: true, mode: 0o700 });
+    const pathModule = getPathModuleForTarget(options.targetDir, options.platform);
+    const targetPath = pathModule.join(options.targetDir, options.targetFileName);
+    if (options.overwrite) {
+        await (0, promises_1.writeFile)(targetPath, options.buffer, { mode: 0o600 });
+        return targetPath;
+    }
+    for (let index = 0; index < 1000; index += 1) {
+        const candidatePath = index === 0 ? targetPath : appendFileNameSuffix(pathModule, targetPath, index);
+        try {
+            await (0, promises_1.writeFile)(candidatePath, options.buffer, {
+                flag: "wx",
+                mode: 0o600,
+            });
+            return candidatePath;
+        }
+        catch (error) {
+            if (error.code !== "EEXIST") {
+                throw error;
+            }
+        }
+    }
+    throw new Error("Could not choose a unique attachment download path.");
+}
 async function createAuthorizedGmailClient(credentialsPath, token, dependencies) {
     if (dependencies.createGmailClient) {
         return dependencies.createGmailClient({
@@ -664,6 +755,50 @@ async function callTool(toolName, toolArguments, dependencies) {
                 maxChars,
                 message,
             }));
+        }
+        if (toolName === "download_gmail_attachment") {
+            const messageId = readString(toolArguments.message_id, "message_id");
+            const attachmentId = readString(toolArguments.attachment_id, "attachment_id");
+            const downloadDir = readString(toolArguments.download_dir, "download_dir", "");
+            const maxBytes = readInteger(toolArguments.max_bytes, "max_bytes", DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES);
+            const overwrite = readBoolean(toolArguments.overwrite, "overwrite", false);
+            const gmailClient = await createAuthorizedGmailClient(configuredPaths.credentialsPath, await authorizeForTool(configuredPaths, features, dependencies, {
+                scopes: [constants_1.GMAIL_READONLY_SCOPE],
+            }), dependencies);
+            const message = await gmailClient.getMessage(messageId);
+            const attachmentMetadata = (0, attachments_1.findGmailAttachment)(message, attachmentId);
+            if (!attachmentMetadata) {
+                throw new Error(`Attachment was not found in message: ${attachmentId}`);
+            }
+            if (attachmentMetadata.size > maxBytes) {
+                throw new Error(`Attachment is too large to download: ${attachmentMetadata.size} bytes exceeds max_bytes ${maxBytes}.`);
+            }
+            const attachment = await gmailClient.getAttachment(messageId, attachmentId);
+            if (!attachment.data) {
+                throw new Error(`Attachment data was not returned for: ${attachmentId}`);
+            }
+            const buffer = Buffer.from(attachment.data, "base64url");
+            if (buffer.byteLength > maxBytes) {
+                throw new Error(`Attachment is too large to download: ${buffer.byteLength} bytes exceeds max_bytes ${maxBytes}.`);
+            }
+            const targetDir = buildAttachmentDownloadDir(pathContext, downloadDir, messageId);
+            const savedPath = await writeAttachmentFile({
+                buffer,
+                overwrite,
+                platform: pathContext.platform,
+                targetDir,
+                targetFileName: buildAttachmentFileName(attachmentId, attachmentMetadata.filename),
+            });
+            return buildToolSuccessResult({
+                attachment_id: attachmentId,
+                content_returned: false,
+                filename: attachmentMetadata.filename,
+                message_id: messageId,
+                mime_type: attachmentMetadata.mime_type,
+                saved_path: savedPath,
+                sha256: (0, node_crypto_1.createHash)("sha256").update(buffer).digest("hex"),
+                size: buffer.byteLength,
+            });
         }
         if (toolName === "get_drive_about") {
             const driveClient = await createAuthorizedDriveClient(configuredPaths.credentialsPath, await authorizeForTool(configuredPaths, features, dependencies, {

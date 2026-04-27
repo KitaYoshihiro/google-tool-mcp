@@ -97,6 +97,14 @@ export function getDefaultConfigDir(context: PathContext = {}): string {
   return getConfigDirForProfile(homeDir, platform, profileName);
 }
 
+export function getDefaultCacheDir(context: PathContext = {}): string {
+  const env = getEnv(context.env);
+  const homeDir = getHomeDir(context.homeDir, env);
+  const platform = getPlatform(context.platform);
+  const pathModule = getPathModule(platform, homeDir);
+  return pathModule.join(homeDir, ".cache", APP_NAME);
+}
+
 export function getSharedConfigDir(context: PathContext = {}): string {
   const env = getEnv(context.env);
   const homeDir = getHomeDir(context.homeDir, env);

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import {
@@ -181,6 +184,7 @@ test("mcp tools/list returns the expected tool definitions", async () => {
     "read_gmail_message",
     "list_gmail_attachments",
     "read_gmail_attachment_text",
+    "download_gmail_attachment",
     "get_drive_about",
     "list_drive_files",
     "read_drive_file",
@@ -1153,6 +1157,85 @@ test("mcp tools/call read_gmail_attachment_text returns decoded text", async () 
   });
 });
 
+test("mcp tools/call download_gmail_attachment saves a local file and returns metadata only", async () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "google-tool-mcp-attachment-"));
+
+  try {
+    const handler = createMcpProtocolHandler({
+      ...configuredCredentialDependencies(),
+      ensureAuthorizedToken: async () => ({
+        source: "saved",
+        token: {
+          access_token: "access-token",
+        },
+      }),
+      createGmailClient: async () => ({
+        async listLabels() {
+          return [];
+        },
+        async listMessageIds() {
+          return [];
+        },
+        async getAttachment() {
+          return {
+            data: Buffer.from("PDF bytes", "utf-8").toString("base64url"),
+            size: 9,
+          };
+        },
+        async getMessage() {
+          return {
+            id: "msg-001",
+            payload: {
+              parts: [
+                {
+                  filename: "../report.pdf",
+                  mimeType: "application/pdf",
+                  body: {
+                    attachmentId: "att-001",
+                    size: 9,
+                  },
+                },
+              ],
+            },
+          };
+        },
+      }),
+    });
+    await initializeHandler(handler);
+
+    const response = await handler.handleMessage({
+      jsonrpc: "2.0",
+      id: 27,
+      method: "tools/call",
+      params: {
+        name: "download_gmail_attachment",
+        arguments: {
+          message_id: "msg-001",
+          attachment_id: "att-001",
+          download_dir: tempDir,
+        },
+      },
+    });
+    const structuredContent = (response as { result: { structuredContent: Record<string, unknown> } }).result.structuredContent;
+    const savedPath = structuredContent.saved_path as string;
+
+    assert.equal(readFileSync(savedPath, "utf-8"), "PDF bytes");
+    assert.equal(savedPath, path.join(tempDir, "att-001-report.pdf"));
+    assert.deepEqual(structuredContent, {
+      attachment_id: "att-001",
+      content_returned: false,
+      filename: "../report.pdf",
+      message_id: "msg-001",
+      mime_type: "application/pdf",
+      saved_path: savedPath,
+      sha256: "662f0631667382600d18269aeb84b04987b60124d1371b34cd783ae06cbe656c",
+      size: 9,
+    });
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("mcp tools/call get_drive_about returns structured content", async () => {
   const handler = createMcpProtocolHandler({
     ...configuredCredentialDependencies(),
@@ -1535,6 +1618,7 @@ test("mcp tools/list hides Drive tools when drive is disabled", async () => {
     "read_gmail_message",
     "list_gmail_attachments",
     "read_gmail_attachment_text",
+    "download_gmail_attachment",
   ]);
 });
 
@@ -1720,6 +1804,7 @@ test("runMcpServer speaks newline-delimited JSON stdio", async () => {
       "read_gmail_message",
       "list_gmail_attachments",
       "read_gmail_attachment_text",
+      "download_gmail_attachment",
       "get_drive_about",
       "list_drive_files",
       "read_drive_file",
