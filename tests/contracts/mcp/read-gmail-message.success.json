@@ -1,0 +1,10 @@
+{
+  "id": "msg-001",
+  "thread_id": "thread-001",
+  "subject": "Build report",
+  "sender": "Dev Team <dev@example.com>",
+  "date": "Tue, 22 Apr 2026 09:00:00 +0900",
+  "snippet": "The nightly build passed.",
+  "body": "Hello team,\n\nThe nightly build passed.",
+  "body_truncated": false
+}

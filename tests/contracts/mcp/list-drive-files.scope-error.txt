@@ -1,0 +1,1 @@
+RuntimeError: OAuth token at /home/user/.config/google-tool/token.json does not include the required Google API scopes. Reauthorize with the required scopes, or point GOOGLE_TOOL_TOKEN to a token.json file that includes them. Missing scopes: https://www.googleapis.com/auth/drive.metadata.readonly

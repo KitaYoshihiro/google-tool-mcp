@@ -1,0 +1,36 @@
+{
+  "corpora": "user",
+  "count": 1,
+  "drive_id": "",
+  "files": [
+    {
+      "created_time": "",
+      "description": "",
+      "drive_id": "",
+      "folder_color_rgb": "",
+      "icon_link": "",
+      "id": "file-001",
+      "mime_type": "application/vnd.google-apps.document",
+      "modified_time": "2026-04-22T00:00:00.000Z",
+      "name": "Quarterly Plan",
+      "owned_by_me": false,
+      "owners": [],
+      "parents": [],
+      "resource_key": "",
+      "shared": false,
+      "shortcut_details": null,
+      "size": "",
+      "starred": false,
+      "thumbnail_link": "",
+      "trashed": false,
+      "web_view_link": "https://drive.google.com/file/d/file-001/view"
+    }
+  ],
+  "include_items_from_all_drives": false,
+  "include_trashed": false,
+  "incomplete_search": false,
+  "max_results": 10,
+  "next_page_token": "",
+  "order_by": "",
+  "query": "fullText contains 'quarterly plan'"
+}

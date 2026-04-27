@@ -1,0 +1,16 @@
+.serena/
+.codex
+.playwright-mcp/
+node_modules/
+build/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.env*
+*.log
+*.orig
+*.swp
+*.tgz
+*.tmp
+credentials.json
+token.json

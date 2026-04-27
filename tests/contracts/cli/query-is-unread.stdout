@@ -1,0 +1,18 @@
+[1] Build report
+From: Dev Team <dev@example.com>
+Date: Tue, 22 Apr 2026 09:00:00 +0900
+Message ID: msg-001
+
+Hello team,
+
+The nightly build passed.
+
+--------------------------------------------------------------------------------
+[2] Invoice reminder
+From: Billing <billing@example.com>
+Date: Tue, 22 Apr 2026 08:30:00 +0900
+Message ID: msg-002
+
+Your invoice is ready.
+
+--------------------------------------------------------------------------------

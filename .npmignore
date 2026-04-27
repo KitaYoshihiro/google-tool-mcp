@@ -1,0 +1,7 @@
+.serena/
+.codex
+node_modules/
+build/
+dist/
+credentials.json
+token.json

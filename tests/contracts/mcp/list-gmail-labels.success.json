@@ -1,0 +1,8 @@
+{
+  "count": 3,
+  "labels": [
+    { "id": "INBOX", "name": "INBOX", "type": "system" },
+    { "id": "Label_1", "name": "Projects", "type": "user" },
+    { "id": "Label_2", "name": "Receipts", "type": "user" }
+  ]
+}

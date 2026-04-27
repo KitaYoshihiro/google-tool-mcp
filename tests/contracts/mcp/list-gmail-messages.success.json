@@ -1,0 +1,18 @@
+{
+  "count": 1,
+  "query": "is:unread",
+  "labels": ["Projects"],
+  "resolved_label_ids": ["Label_1"],
+  "messages": [
+    {
+      "id": "msg-001",
+      "thread_id": "thread-001",
+      "subject": "Build report",
+      "sender": "Dev Team <dev@example.com>",
+      "date": "Tue, 22 Apr 2026 09:00:00 +0900",
+      "snippet": "The nightly build passed.",
+      "body": "",
+      "body_truncated": false
+    }
+  ]
+}

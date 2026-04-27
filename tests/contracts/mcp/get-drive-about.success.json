@@ -1,0 +1,15 @@
+{
+  "user": {
+    "display_name": "Alice Example",
+    "email_address": "alice@example.com",
+    "me": true,
+    "permission_id": "permission-123",
+    "photo_link": "https://example.com/photo.png"
+  },
+  "storage_quota": {
+    "limit": "1000",
+    "usage": "250",
+    "usage_in_drive": "200",
+    "usage_in_drive_trash": "50"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "created_time": "",
+  "description": "Planning doc",
+  "drive_id": "",
+  "folder_color_rgb": "",
+  "icon_link": "",
+  "id": "file-001",
+  "mime_type": "application/vnd.google-apps.document",
+  "modified_time": "",
+  "name": "Quarterly Plan",
+  "owned_by_me": false,
+  "owners": [
+    {
+      "display_name": "Alice Example",
+      "email_address": "alice@example.com",
+      "me": false,
+      "permission_id": "",
+      "photo_link": ""
+    }
+  ],
+  "parents": [
+    "folder-123"
+  ],
+  "resource_key": "",
+  "shared": false,
+  "shortcut_details": {
+    "target_id": "target-001",
+    "target_mime_type": "application/pdf",
+    "target_resource_key": ""
+  },
+  "size": "",
+  "starred": false,
+  "thumbnail_link": "",
+  "trashed": false,
+  "web_view_link": ""
+}
