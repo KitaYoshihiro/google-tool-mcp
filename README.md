@@ -149,9 +149,14 @@ enabled = true
 
 例:
 
-- `name contains '議事録'`
-- `fullText contains 'プロジェクトA'`
-- `mimeType = 'application/vnd.google-apps.folder' and name contains '経理'`
+- `name contains '議事録' and trashed = false`
+- `fullText contains 'プロジェクトA' and trashed = false`
+- `fullText contains '契約更新' and mimeType = 'application/pdf' and trashed = false`
+- `fullText contains '契約更新' and mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' and trashed = false`
+- `fullText contains '予算案' and mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed = false`
+- `fullText contains 'ロードマップ' and mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' and trashed = false`
+- `fullText contains '議事録' and mimeType = 'application/vnd.google-apps.document' and trashed = false`
+- `mimeType = 'application/vnd.google-apps.folder' and name contains '経理' and trashed = false`
 - `'folder-id' in parents and trashed = false`
 
 サーバー側では `include_trashed = false` が既定なので、通常はゴミ箱を除外した検索になります。

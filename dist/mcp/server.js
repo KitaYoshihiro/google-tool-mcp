@@ -101,21 +101,50 @@ const DRIVE_TOOL_DEFINITIONS = [
     },
     {
         name: "list_drive_files",
-        description: "Search Google Drive files and folders by metadata using the files.list q parameter.",
+        description: [
+            "Search Google Drive files and folders using Google Drive API files.list q syntax.",
+            "Use name contains 'term' for filename search and fullText contains 'term' for indexed content search.",
+            "Prefer adding trashed = false in q unless the user asks for trashed files.",
+            "For file-type searches, combine fullText with mimeType filters such as application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document for DOCX, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet for XLSX, application/vnd.openxmlformats-officedocument.presentationml.presentation for PPTX, application/vnd.google-apps.document for Google Docs, and application/vnd.google-apps.spreadsheet for Google Sheets.",
+            "This tool returns metadata only, not file contents.",
+        ].join(" "),
         inputSchema: {
             type: "object",
             properties: {
                 max_results: { type: "integer", default: 10 },
-                query: { type: "string", default: "" },
-                include_trashed: { type: "boolean", default: false },
+                query: {
+                    type: "string",
+                    default: "",
+                    description: [
+                        "Google Drive API files.list q expression.",
+                        "Examples: name contains '議事録' and trashed = false; fullText contains '契約更新' and mimeType = 'application/pdf' and trashed = false; fullText contains '予算案' and mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed = false; mimeType = 'application/vnd.google-apps.folder' and name contains '経理' and trashed = false.",
+                    ].join(" "),
+                },
+                include_trashed: {
+                    type: "boolean",
+                    default: false,
+                    description: "Whether to include trashed files in returned results. Also add trashed = false to query when the user wants normal non-trashed search semantics.",
+                },
                 corpora: {
                     type: "string",
                     enum: ["user", "domain", "drive", "allDrives"],
                     default: "user",
+                    description: "Drive API corpora value. Use user for normal My Drive/shared-with-me searches; use drive with drive_id for a specific shared drive; use allDrives only when needed.",
                 },
-                drive_id: { type: "string" },
-                include_items_from_all_drives: { type: "boolean", default: false },
-                order_by: { type: "string", default: "" },
+                drive_id: {
+                    type: "string",
+                    description: "Shared drive ID when corpora is drive.",
+                },
+                include_items_from_all_drives: {
+                    type: "boolean",
+                    default: false,
+                    description: "Set true when searching shared drives or all drives.",
+                },
+                order_by: {
+                    type: "string",
+                    default: "",
+                    description: "Drive API orderBy expression, for example modifiedTime desc or name.",
+                },
             },
         },
     },
