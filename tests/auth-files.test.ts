@@ -13,6 +13,7 @@ import {
   ensureAuthorizedToken,
   exchangeCodeForToken,
   GmailAuthRequiredError,
+  GoogleOAuthGrantError,
   GoogleScopeRequiredError,
   getPreferredRedirectUri,
   loadOAuthClientCredentials,
@@ -354,6 +355,58 @@ test("exchangeCodeForToken can opt out of refresh token enforcement", async () =
   });
 });
 
+test("exchangeCodeForToken explains invalid_grant during authorization code exchange", async () => {
+  const client = {
+    credentials: {},
+    setCredentials() {},
+    async getToken() {
+      const error = new Error("invalid_grant");
+      Object.assign(error, {
+        response: {
+          status: 400,
+          data: {
+            error: "invalid_grant",
+            error_description: "Bad Request",
+          },
+        },
+      });
+      throw error;
+    },
+  };
+
+  await assert.rejects(
+    exchangeCodeForToken(client, "auth-code", {
+      credentials: {
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        redirectUris: ["http://127.0.0.1/callback"],
+      },
+    }),
+    (error: unknown) =>
+      error instanceof GoogleOAuthGrantError &&
+      error.operation === "authorization_code_exchange" &&
+      error.message.includes("Google rejected the browser authorization code.") &&
+      error.message.includes("The authorization code expired or was already used.") &&
+      error.message.includes("Google response: Bad Request"),
+  );
+});
+
+test("exchangeCodeForToken preserves non-invalid_grant token exchange errors", async () => {
+  const originalError = new Error("network unavailable");
+  const client = {
+    credentials: {},
+    setCredentials() {},
+    async getToken() {
+      throw originalError;
+    },
+  };
+
+  await assert.rejects(
+    exchangeCodeForToken(client, "auth-code"),
+    (error: unknown) => error === originalError,
+  );
+});
+
 test("manual auth instructions include the authorization URL", () => {
   assert.equal(
     buildManualAuthInstructions("https://example.com/auth"),
@@ -545,6 +598,11 @@ test("ensureAuthorizedToken refreshes an expired token and persists it", async (
       access_token: "fresh-access-token",
       refresh_token: "refresh-token",
       expiry_date: 50_000,
+      _google_tool: {
+        client_id: "client-id",
+        credentials_path: "/tmp/credentials.json",
+        scopes: ["scope-a"],
+      },
     },
   });
   assert.deepEqual(savedTokens, [
@@ -554,9 +612,74 @@ test("ensureAuthorizedToken refreshes an expired token and persists it", async (
         access_token: "fresh-access-token",
         refresh_token: "refresh-token",
         expiry_date: 50_000,
+        _google_tool: {
+          client_id: "client-id",
+          credentials_path: "/tmp/credentials.json",
+          scopes: ["scope-a"],
+        },
       },
     },
   ]);
+});
+
+test("ensureAuthorizedToken explains invalid_grant while refreshing saved token", async () => {
+  await assert.rejects(
+    ensureAuthorizedToken({
+      credentialsPath: "/tmp/credentials.json",
+      tokenPath: "/tmp/token.json",
+      scopes: ["scope-a"],
+      allowBrowserAuth: false,
+      now: 1_000,
+      loadSavedToken: async () => ({
+        access_token: "stale-access-token",
+        refresh_token: "refresh-token",
+        expiry_date: 100,
+        _google_tool: {
+          authorized_at: "2000-01-01T00:00:00.000Z",
+          client_id: "old-client-id",
+          credentials_path: "/tmp/old-credentials.json",
+          scopes: ["scope-a"],
+        },
+      }),
+      readTextFile: async () =>
+        JSON.stringify({
+          installed: {
+            client_id: "new-client-id",
+            client_secret: "client-secret",
+            redirect_uris: ["http://127.0.0.1/callback"],
+          },
+        }),
+      clientFactory() {
+        return {
+          credentials: {},
+          setCredentials(credentials: Record<string, unknown>) {
+            this.credentials = credentials;
+          },
+          async refreshAccessToken() {
+            const error = new Error("invalid_grant");
+            Object.assign(error, {
+              response: {
+                status: 400,
+                data: {
+                  error: "invalid_grant",
+                  error_description: "Token has been expired or revoked.",
+                },
+              },
+            });
+            throw error;
+          },
+        };
+      },
+    }),
+    (error: unknown) =>
+      error instanceof GoogleOAuthGrantError &&
+      error.operation === "refresh" &&
+      error.message.includes("Google rejected the saved OAuth refresh token.") &&
+      error.message.includes("Google response: Token has been expired or revoked.") &&
+      error.message.includes("different OAuth client_id") &&
+      error.message.includes("short refresh-token lifetime may apply") &&
+      error.message.includes("Move or delete token.json"),
+  );
 });
 
 test("ensureAuthorizedToken runs interactive auth and saves the resulting token", async () => {
@@ -568,6 +691,7 @@ test("ensureAuthorizedToken runs interactive auth and saves the resulting token"
     tokenPath: "/tmp/token.json",
     scopes: ["scope-a"],
     allowBrowserAuth: true,
+    now: 1_000,
     loadSavedToken: async () => null,
     readTextFile: async () =>
       JSON.stringify({
@@ -612,6 +736,12 @@ test("ensureAuthorizedToken runs interactive auth and saves the resulting token"
       access_token: "access-token",
       refresh_token: "refresh-token",
       scope: "scope-a",
+      _google_tool: {
+        authorized_at: "1970-01-01T00:00:01.000Z",
+        client_id: "client-id",
+        credentials_path: "/tmp/credentials.json",
+        scopes: ["scope-a"],
+      },
     },
   });
   assert.deepEqual(savedTokens, [
@@ -621,6 +751,12 @@ test("ensureAuthorizedToken runs interactive auth and saves the resulting token"
         access_token: "access-token",
         refresh_token: "refresh-token",
         scope: "scope-a",
+        _google_tool: {
+          authorized_at: "1970-01-01T00:00:01.000Z",
+          client_id: "client-id",
+          credentials_path: "/tmp/credentials.json",
+          scopes: ["scope-a"],
+        },
       },
     },
   ]);

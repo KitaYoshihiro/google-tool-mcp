@@ -23,6 +23,14 @@ export interface SavedToken {
   scope?: string;
   token_type?: string;
   expiry_date?: number;
+  _google_tool?: TokenDiagnosticsMetadata;
+}
+
+export interface TokenDiagnosticsMetadata {
+  authorized_at?: string;
+  client_id?: string;
+  credentials_path?: string;
+  scopes?: string[];
 }
 
 interface OAuthTokenResponseShape {
@@ -60,7 +68,10 @@ export interface AuthorizationUrlOptions {
 
 export interface ExchangeCodeOptions {
   codeVerifier?: string;
+  credentials?: DesktopClientCredentials;
+  credentialsPath?: string;
   requireRefreshToken?: boolean;
+  tokenPath?: string;
   scopes?: readonly string[];
 }
 
@@ -150,6 +161,22 @@ interface DesktopClientFileShape {
   };
 }
 
+export interface GoogleOAuthErrorDetails {
+  error?: string;
+  errorDescription?: string;
+  status?: number;
+}
+
+interface GoogleOAuthGrantErrorOptions {
+  cause: unknown;
+  credentials?: DesktopClientCredentials;
+  credentialsPath?: string;
+  details: GoogleOAuthErrorDetails;
+  operation: "refresh" | "authorization_code_exchange";
+  savedToken?: SavedToken;
+  tokenPath?: string;
+}
+
 export class GmailAuthRequiredError extends Error {
   constructor(tokenPath: string) {
     super(
@@ -174,6 +201,20 @@ export class GoogleCredentialsRequiredError extends Error {
       `Google OAuth client credentials are not configured. User action required: place a Desktop app OAuth client JSON file at ${credentialsPath}. To use another location, set ${ENV_CREDENTIALS_PATH} to the full credentials.json path in the MCP server configuration. Then retry the same tool call; browser authorization will create ${tokenPath}. After presenting this setup guidance, wait for the user to configure credentials instead of running unrelated CLI commands.`,
     );
     this.name = "GoogleCredentialsRequiredError";
+  }
+}
+
+export class GoogleOAuthGrantError extends Error {
+  readonly cause: unknown;
+  readonly details: GoogleOAuthErrorDetails;
+  readonly operation: GoogleOAuthGrantErrorOptions["operation"];
+
+  constructor(options: GoogleOAuthGrantErrorOptions) {
+    super(formatGoogleOAuthGrantErrorMessage(options));
+    this.name = "GoogleOAuthGrantError";
+    this.cause = options.cause;
+    this.details = options.details;
+    this.operation = options.operation;
   }
 }
 
@@ -231,6 +272,10 @@ function hasValidTokenShape(token: unknown): token is SavedToken {
     return false;
   }
 
+  if (!hasValidTokenDiagnosticsMetadata(candidate._google_tool)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -255,6 +300,249 @@ function parseGrantedScopes(scopeValue: string | undefined): Set<string> | null 
       .map((scope) => scope.trim())
       .filter((scope) => scope.length > 0),
   );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function hasValidTokenDiagnosticsMetadata(
+  value: unknown,
+): value is TokenDiagnosticsMetadata {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.authorized_at === undefined ||
+      typeof candidate.authorized_at === "string") &&
+    (candidate.client_id === undefined ||
+      typeof candidate.client_id === "string") &&
+    (candidate.credentials_path === undefined ||
+      typeof candidate.credentials_path === "string") &&
+    (candidate.scopes === undefined || isStringArray(candidate.scopes))
+  );
+}
+
+function stripTokenDiagnosticsMetadata(token: SavedToken): SavedToken {
+  const { _google_tool: _metadata, ...credentialToken } = token;
+  return credentialToken;
+}
+
+function withTokenDiagnosticsMetadata(
+  token: SavedToken,
+  options: {
+    authorizedAt?: string;
+    credentials?: DesktopClientCredentials;
+    credentialsPath?: string;
+    existingToken?: SavedToken;
+    scopes?: readonly string[];
+  },
+): SavedToken {
+  const existingMetadata = options.existingToken?._google_tool ?? token._google_tool;
+  const metadata: TokenDiagnosticsMetadata = {
+    ...existingMetadata,
+  };
+
+  if (options.authorizedAt !== undefined) {
+    metadata.authorized_at = options.authorizedAt;
+  }
+
+  if (options.credentials !== undefined) {
+    metadata.client_id = options.credentials.clientId;
+  }
+
+  if (options.credentialsPath !== undefined) {
+    metadata.credentials_path = options.credentialsPath;
+  }
+
+  if (options.scopes !== undefined) {
+    metadata.scopes = normalizeScopes(options.scopes);
+  }
+
+  if (Object.keys(metadata).length === 0) {
+    return token;
+  }
+
+  return {
+    ...token,
+    _google_tool: metadata,
+  };
+}
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function extractGoogleOAuthErrorDetails(error: unknown): GoogleOAuthErrorDetails {
+  const errorRecord = getRecord(error);
+  const response = getRecord(errorRecord?.response);
+  const data = getRecord(response?.data);
+  const status =
+    typeof response?.status === "number"
+      ? response.status
+      : typeof errorRecord?.code === "number"
+        ? errorRecord.code
+        : undefined;
+  const googleError =
+    typeof data?.error === "string"
+      ? data.error
+      : typeof errorRecord?.error === "string"
+        ? errorRecord.error
+        : undefined;
+  const errorDescription =
+    typeof data?.error_description === "string"
+      ? data.error_description
+      : typeof errorRecord?.error_description === "string"
+        ? errorRecord.error_description
+        : undefined;
+
+  return {
+    error: googleError,
+    errorDescription,
+    status,
+  };
+}
+
+function isInvalidGrantError(details: GoogleOAuthErrorDetails, error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return details.error === "invalid_grant" || /\binvalid_grant\b/u.test(message);
+}
+
+function formatElapsedDays(authorizedAt: string | undefined): number | null {
+  if (!authorizedAt) {
+    return null;
+  }
+
+  const authorizedAtMs = Date.parse(authorizedAt);
+  if (!Number.isFinite(authorizedAtMs)) {
+    return null;
+  }
+
+  return Math.floor((Date.now() - authorizedAtMs) / (24 * 60 * 60 * 1000));
+}
+
+function buildGoogleOAuthGrantFacts(
+  options: GoogleOAuthGrantErrorOptions,
+): string[] {
+  const facts: string[] = [];
+  const googleError = options.details.error ?? "invalid_grant";
+  facts.push(
+    options.operation === "refresh"
+      ? `The failure happened while refreshing the saved OAuth token with Google.`
+      : `The failure happened while exchanging the browser authorization code for OAuth tokens.`,
+  );
+  facts.push(`Google rejected the OAuth grant with ${googleError}.`);
+
+  if (options.details.errorDescription) {
+    facts.push(`Google response: ${options.details.errorDescription}`);
+  }
+
+  if (options.tokenPath) {
+    facts.push(`Token path: ${options.tokenPath}`);
+  }
+
+  const tokenClientId = options.savedToken?._google_tool?.client_id;
+  const credentialsClientId = options.credentials?.clientId;
+  if (tokenClientId && credentialsClientId) {
+    facts.push(
+      tokenClientId === credentialsClientId
+        ? "The saved token metadata matches the current credentials.json OAuth client_id."
+        : "The saved token metadata was created for a different OAuth client_id than the current credentials.json.",
+    );
+  }
+
+  const authorizedAt = options.savedToken?._google_tool?.authorized_at;
+  const elapsedDays = formatElapsedDays(authorizedAt);
+  if (authorizedAt && elapsedDays !== null) {
+    facts.push(`The saved token metadata says browser authorization happened ${elapsedDays} day(s) ago.`);
+  }
+
+  return facts;
+}
+
+function buildGoogleOAuthGrantPossibleCauses(
+  options: GoogleOAuthGrantErrorOptions,
+): string[] {
+  if (options.operation === "authorization_code_exchange") {
+    return [
+      "The authorization code expired or was already used.",
+      "The browser callback did not match the redirect URI or PKCE verifier used by this server.",
+      "The authorization code was issued for a different OAuth client.",
+    ];
+  }
+
+  const causes = [
+    "The refresh token was revoked in the Google Account security settings.",
+    "The refresh token expired under Google OAuth policy, such as long inactivity or account security changes.",
+    "The refresh token was superseded after too many tokens were issued for the same user and OAuth client.",
+  ];
+
+  const tokenClientId = options.savedToken?._google_tool?.client_id;
+  const credentialsClientId = options.credentials?.clientId;
+  if (tokenClientId && credentialsClientId && tokenClientId !== credentialsClientId) {
+    causes.unshift("token.json and credentials.json belong to different OAuth clients.");
+  }
+
+  const elapsedDays = formatElapsedDays(options.savedToken?._google_tool?.authorized_at);
+  if (elapsedDays !== null && elapsedDays >= 7) {
+    causes.unshift(
+      "If the OAuth consent screen is External and still in Testing, Google's short refresh-token lifetime may apply.",
+    );
+  } else {
+    causes.push(
+      "If the OAuth consent screen is External and still in Testing, Google's short refresh-token lifetime may apply.",
+    );
+  }
+
+  return causes;
+}
+
+function formatGoogleOAuthGrantErrorMessage(
+  options: GoogleOAuthGrantErrorOptions,
+): string {
+  const summary =
+    options.operation === "refresh"
+      ? "Google rejected the saved OAuth refresh token."
+      : "Google rejected the browser authorization code.";
+  const facts = buildGoogleOAuthGrantFacts(options);
+  const possibleCauses = buildGoogleOAuthGrantPossibleCauses(options);
+  const action =
+    options.operation === "refresh"
+      ? "Move or delete token.json, then retry the same tool call to complete browser authorization again."
+      : "Retry the same tool call and complete the browser authorization flow again.";
+
+  return [
+    summary,
+    "Confirmed details:",
+    ...facts.map((fact) => `- ${fact}`),
+    "Possible causes:",
+    ...possibleCauses.map((cause) => `- ${cause}`),
+    `Action: ${action}`,
+  ].join("\n");
+}
+
+function wrapInvalidGrantError(
+  error: unknown,
+  options: Omit<GoogleOAuthGrantErrorOptions, "cause" | "details">,
+): never {
+  const details = extractGoogleOAuthErrorDetails(error);
+  if (!isInvalidGrantError(details, error)) {
+    throw error;
+  }
+
+  throw new GoogleOAuthGrantError({
+    ...options,
+    cause: error,
+    details,
+  });
 }
 
 function tokenHasRequiredScopes(
@@ -411,7 +699,7 @@ export function applySavedToken(
     throw new Error("Saved token JSON has an invalid shape.");
   }
 
-  client.setCredentials(token);
+  client.setCredentials(stripTokenDiagnosticsMetadata(token));
   return token;
 }
 
@@ -433,12 +721,17 @@ export async function refreshSavedToken(
           refresh_token: existingToken.refresh_token,
         }
       : { ...result.credentials };
-  const normalizedToken = withOptionalScope(
-    mergedToken,
-    result.credentials.scope ?? existingToken?.scope,
+  const normalizedToken = withTokenDiagnosticsMetadata(
+    withOptionalScope(
+      mergedToken,
+      result.credentials.scope ?? existingToken?.scope,
+    ),
+    {
+      existingToken,
+    },
   );
 
-  client.setCredentials(normalizedToken);
+  client.setCredentials(stripTokenDiagnosticsMetadata(normalizedToken));
   return normalizedToken;
 }
 
@@ -450,7 +743,17 @@ export async function exchangeCodeForToken(
   const getTokenArg = options.codeVerifier
     ? { code, codeVerifier: options.codeVerifier }
     : code;
-  const result = await client.getToken(getTokenArg);
+  let result: OAuthTokenResponseShape;
+  try {
+    result = await client.getToken(getTokenArg);
+  } catch (error) {
+    wrapInvalidGrantError(error, {
+      credentials: options.credentials,
+      credentialsPath: options.credentialsPath,
+      operation: "authorization_code_exchange",
+      tokenPath: options.tokenPath,
+    });
+  }
   if (!hasValidTokenShape(result.tokens)) {
     throw new Error("Saved token JSON has an invalid shape.");
   }
@@ -462,7 +765,7 @@ export async function exchangeCodeForToken(
   }
 
   const token = withRequiredScopes(result.tokens, options.scopes ?? []);
-  client.setCredentials(token);
+  client.setCredentials(stripTokenDiagnosticsMetadata(token));
   return token;
 }
 
@@ -694,6 +997,7 @@ export async function runInteractiveAuthorization(
     const { code } = await listener.waitForCode();
     const token = await exchangeCodeForToken(client, code, {
       codeVerifier: pkce.codeVerifier,
+      credentials: options.credentials,
       requireRefreshToken: true,
       scopes: options.scopes,
     });
@@ -781,12 +1085,29 @@ export async function ensureAuthorizedToken(
       options.clientFactory?.(credentials) ??
       createOAuthClient(credentials);
     applySavedToken(client, savedToken);
-    const refreshedToken = await refreshSavedToken(client);
-    await (options.saveToken ?? saveToken)(options.tokenPath, refreshedToken);
+    let refreshedToken: SavedToken;
+    try {
+      refreshedToken = await refreshSavedToken(client);
+    } catch (error) {
+      wrapInvalidGrantError(error, {
+        credentials,
+        credentialsPath: options.credentialsPath,
+        operation: "refresh",
+        savedToken,
+        tokenPath: options.tokenPath,
+      });
+    }
+    const tokenWithDiagnostics = withTokenDiagnosticsMetadata(refreshedToken, {
+      credentials,
+      credentialsPath: options.credentialsPath,
+      existingToken: savedToken,
+      scopes: options.scopes,
+    });
+    await (options.saveToken ?? saveToken)(options.tokenPath, tokenWithDiagnostics);
 
     return {
       source: "refreshed",
-      token: refreshedToken,
+      token: tokenWithDiagnostics,
     };
   }
 
@@ -807,9 +1128,17 @@ export async function ensureAuthorizedToken(
       scopes: options.scopes,
       onAuthorizationReady: options.onAuthorizationReady,
     });
-  const interactiveToken = withRequiredScopes(
-    interactiveAuthorization.token,
-    options.scopes,
+  const interactiveToken = withTokenDiagnosticsMetadata(
+    withRequiredScopes(
+      interactiveAuthorization.token,
+      options.scopes,
+    ),
+    {
+      authorizedAt: new Date(now).toISOString(),
+      credentials,
+      credentialsPath: options.credentialsPath,
+      scopes: options.scopes,
+    },
   );
   await (options.saveToken ?? saveToken)(
     options.tokenPath,
